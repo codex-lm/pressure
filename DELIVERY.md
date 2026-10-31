@@ -1,4 +1,4 @@
-# Delivery notes — Pressure (prototype, 31 October 2026)
+# Delivery notes — Pressure (v1.1.0 « Agency », 31 October 2026)
 
 One of a batch of three prototypes (Accretion, Counterweight, Pressure)
 requested directly by Cédric. LOB7 publication is intentionally **deferred
@@ -94,3 +94,41 @@ blue `#37b3c8` / deep `#1d8aa3`, single accent sun orange `#f5820b`
 (gauge, alarms, UI), danger red `#e5484d`, ink `#17323a`; five bubble
 colours with distinct symbols (red circle, amber triangle, green square,
 violet diamond, blue plus).
+
+---
+
+## v1.1.0 — Agency update (31 October 2026, same day)
+
+Cédric's playtest verdict on v1.0.0: the game felt luck-driven and the win
+condition was unclear. v1.1.0 answers with three levers and a win state:
+
+1. **Choose the next colour** — a visible queue of 3 upcoming bubbles; tap a
+   colour to bring it next. Colour generation biases 55 % toward colours
+   already floating (groups form), lead/rainbow items are locked: they
+   cannot be promoted and nothing can jump over them at the front.
+2. **Aim the intake** — tap a mouth to arm it (orange glow); the next bubble
+   enters there. Without player input the least-blocked mouth is picked.
+3. **Stir** — a swipe sends a current (push + swirl) through the jar; 2
+   charges to start, 3 max, one earned back per cascade ×2+.
+4. **Win state** — each level has a fusion quota (12, +5/level, cap 45)
+   shown as a progress bar in the HUD. Reaching it pops the whole jar
+   bottom-to-top (+150 × level bonus) and starts the next, faster level.
+   Game over now also reports the level reached.
+
+**Verified for v1.1.0 (in addition to the v1.0.0 suite below):**
+- Node 22/22: queue-item generation (bias bounds, specials gated by level),
+  promote rules (colours yes; specials never; locked front blocks), level
+  quota growth and cap, stir impulse direction/magnitude/swirl bounds.
+- Real browser, real event paths: queue renders (3 chips), chip click
+  promotes, lead at the front blocks promotion through the DOM handler,
+  swipe (pointerdown→pointerup, 120 px) consumes a charge and spawns the
+  current visual, armed mouth is used by the spawner (queue visibly
+  shifts), tap (pointerup path) fuses a trio for 90, full level cycle:
+  4 trios = quota 12 → drain animation → level 2 quota 17, HUD
+  "Lv 2 · 0/17", chip "Level cleared! +150"; FR strings for every new key
+  (À venir / Remous / Niveau atteint / new rule line).
+
+**Known limits added:** balance of quotas vs. speed ramp tuned by feel on
+single full runs, not across many playthroughs; mouth aiming matters only
+from level 3 (second mouth) — the first two levels teach colour choice
+first, by design.

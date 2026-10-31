@@ -1,12 +1,15 @@
 # Pressure
 
-Bubbles rise in a sealed jar and pile up under the lid. Tap a group of 3 or
-more same-colour bubbles: they fuse into one big bubble that races up and
-bursts against the lid. The shockwave shoves the jar around and can press
-same-colour bubbles into groups of 5+ that fuse on their own — chain
-reactions. If the jar fills to the gauge's 100%, or a bubble reaches the
-intake line at the bottom, the glass starts to crack: you have two seconds
-to land a fusion and relieve the pressure, or the jar bursts.
+Bubbles rise in a sealed jar and pile up under the lid. You choose the
+colour of the next bubble from a visible queue of three and aim the intake
+it enters; tap a group of 3+ same-colour bubbles to fuse them into one big
+bubble that races up and bursts against the lid. The shockwave shoves the
+jar around and can press same-colour bubbles into groups of 5+ that fuse on
+their own — chain reactions. Each level has a goal (fuse N bubbles): reach
+it and the whole jar drains in a shower, with a bonus, before the next,
+faster level. Swipe to stir the jar when the stack turns against you. If
+the jar fills to the gauge's 100%, or a bubble reaches the intake line, the
+glass cracks for two seconds — fuse something in time or the jar bursts.
 
 A tiny, self-contained arcade puzzle: one file, no dependencies, no server.
 Works with mouse, touch and keyboard, in English, French and Spanish.
@@ -18,6 +21,16 @@ Play: open `index.html`, or visit the GitHub Pages URL of this repository.
 - Bubbles float **up** and stack under the lid. New bubbles enter through
   intakes at the bottom, faster and faster (1.2 s apart at the start, 0.35 s
   after ~6 minutes).
+- **The queue is your hand**: the next three bubbles are shown above the
+  jar; tap a colour to bring it next (colour generation is biased toward
+  colours already floating, so groups form — but you decide). Lead and
+  rainbow items are locked: when one reaches the front it comes, like it or
+  not — aim the intake, then.
+- **Aim the intake**: tap a mouth at the bottom of the jar; the next bubble
+  enters there (the armed mouth glows). Unarmed, the least-blocked mouth is
+  chosen for you.
+- **Stir**: a swipe sends a current through the jar (push + swirl). You
+  start with 2 charges (max 3); every cascade ×2+ earns one back.
 - **Tap / click a group of 3+ same-colour bubbles** to fuse them. The fused
   bubble's area is the sum of its members'; it flies to the lid and bursts.
 - The **shockwave** pushes nearby bubbles away. Its force and range grow with
@@ -33,6 +46,10 @@ Play: open `index.html`, or visit the GitHub Pages URL of this repository.
   0.5 s.
 - Every ~90 s a **pressure surge** doubles the inflow for 5 seconds. A
   rumble warns you 2 seconds before.
+- **Level goal**: fuse the quota shown in the HUD (12 at level 1, +5 per
+  level). Reaching it clears the level: every bubble pops bottom-to-top,
+  you score a level bonus (150 × level) and the next level starts faster.
+  That is how you win — level after level, until the glass gives.
 - **Defeat**: pressure gauge at 100%, or any bubble on the intake line. The
   glass cracks for 2 s — fuse something in time to cancel the alarm (+300
   *cool* bonus if you do it during the alarm).
@@ -45,6 +62,7 @@ Play: open `index.html`, or visit the GitHub Pages URL of this repository.
 | Cascade step (same chain) | ×2, ×3, ×4… (cap ×8) |
 | Lead destroyed by a wave | +50 |
 | Fusion during the alarm (cool) | +300 |
+| Level cleared | +150 × level |
 
 Best score is saved locally (localStorage, wrapped in try/catch).
 
@@ -53,6 +71,9 @@ Best score is saved locally (localStorage, wrapped in try/catch).
 | Input | Action |
 |---|---|
 | Mouse / touch | tap a group (generous hit zone) |
+| Tap a queue colour | bring it next |
+| Tap a mouth | aim the next bubble there |
+| Swipe (in the jar) | stir — costs one charge |
 | Arrow keys / Tab | select the nearest (or biggest) group |
 | Space / Enter | fuse the selection |
 | P / Esc | pause (auto-pause when the tab loses focus) |

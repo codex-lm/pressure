@@ -44,9 +44,46 @@
   .ibtn:active{ transform:scale(.94); }
   .ibtn svg{ width:19px; height:19px; display:block; }
   #hudLevel{
-    font-size:12px; font-weight:800; letter-spacing:.08em; padding:5px 10px; border-radius:999px;
+    font-size:12px; font-weight:800; letter-spacing:.08em; padding:5px 10px 7px; border-radius:999px;
     background:var(--card); border:1.5px solid var(--line); white-space:nowrap;
+    display:flex; flex-direction:column; align-items:center; gap:3px; pointer-events:none;
   }
+  #goalBar{ width:74px; height:4px; border-radius:2px; background:rgba(23,50,58,.15); overflow:hidden; }
+  #goalFill{ height:100%; width:0%; background:var(--pool); border-radius:2px; transition:width .25s ease; }
+
+  /* ---------- upcoming queue + stir charges ---------- */
+  #queueWrap{
+    position:absolute; left:50%; top:56px; transform:translateX(-50%);
+    display:flex; align-items:flex-start; gap:8px; pointer-events:none; z-index:4;
+  }
+  #queueWrap.hidden{ display:none; }
+  #queueLabel{
+    font-size:9px; font-weight:800; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--ink-soft); text-align:center; margin-bottom:3px;
+  }
+  #queue{ display:flex; gap:7px; align-items:flex-end; }
+  .qchip{
+    pointer-events:auto; width:40px; height:40px; border-radius:50%;
+    border:2.5px solid rgba(23,50,58,.35); cursor:pointer; padding:0;
+    display:flex; align-items:center; justify-content:center; position:relative;
+    box-shadow:0 2px 6px rgba(23,50,58,.18); transition:transform .12s ease;
+  }
+  .qchip:hover{ transform:translateY(-2px); }
+  .qchip:active{ transform:scale(.92); }
+  .qchip.next{ width:50px; height:50px; border-color:var(--sun); border-width:3px; }
+  .qchip svg{ width:62%; height:62%; }
+  .qchip.locked{ filter:saturate(.85); cursor:not-allowed; }
+  .qchip .lockmark{
+    position:absolute; right:-3px; top:-3px; width:14px; height:14px; border-radius:50%;
+    background:var(--ink); color:#fdf8ec; font-size:9px; line-height:14px; text-align:center; font-weight:900;
+  }
+  #stirWrap{ display:flex; flex-direction:column; align-items:center; gap:2px; margin-left:6px; }
+  #stirDots{ display:flex; gap:4px; }
+  .sdot{
+    width:11px; height:11px; border-radius:50%; background:var(--pool); border:1.5px solid var(--pool-deep);
+  }
+  .sdot.off{ background:transparent; border-color:rgba(23,50,58,.25); }
+  #stirLabel{ font-size:9px; font-weight:800; letter-spacing:.1em; color:var(--ink-soft); }
 
   /* ---------- debug ---------- */
   #debug{
@@ -129,7 +166,7 @@
     <div class="hud-left">
       <div><div class="hud-label" data-i18n="score">Score</div><div id="hudScore" class="hud-value">0</div></div>
     </div>
-    <div id="hudLevel">Lv 1</div>
+    <div id="hudLevel"><span id="hudLevelTxt">Lv 1</span><div id="goalBar"><div id="goalFill"></div></div></div>
     <div class="hud-right">
       <div id="hudBestWrap"><div class="hud-label" data-i18n="best">Best</div><div id="hudBest" class="hud-value">0</div></div>
       <button id="btnSound" class="ibtn" aria-label="sound">
@@ -143,6 +180,17 @@
 
   <div id="debug" class="hidden"></div>
   <div id="chip" class="chip-float"></div>
+
+  <div id="queueWrap" class="hidden">
+    <div>
+      <div id="queueLabel" data-i18n="next">Next</div>
+      <div id="queue"></div>
+    </div>
+    <div id="stirWrap">
+      <div id="stirDots"></div>
+      <div id="stirLabel" data-i18n="stir">Stir</div>
+    </div>
+  </div>
 
   <!-- HOME -->
   <div id="home" class="screen">
@@ -191,6 +239,7 @@
       <div class="stat"><span data-i18n="best">Best</span><b id="overBest">0</b></div>
       <div class="stat"><span data-i18n="chainStat">Longest chain</span><b id="overChain">&times;1</b></div>
       <div class="stat"><span data-i18n="fusionsStat">Fusions</span><b id="overFusions">0</b></div>
+      <div class="stat"><span data-i18n="levelStat">Level reached</span><b id="overLevel">1</b></div>
     </div>
     <div class="row">
       <button id="btnReplay" class="btn" data-i18n="replay">Replay</button>
@@ -225,6 +274,9 @@ const SETTINGS = {
   level:{ fusions: 12 },
   surge:{ first: 75, every: 90, dur: 5, warn: 2, mult: 0.5 },
   score:{ fuse: 10, lead: 50, cool: 300, chainCap: 8 },
+  queue:{ size: 3, biasPresent: 0.55 },          /* upcoming colours: the player's hand */
+  goal: { base: 12, perLevel: 5, max: 45, clearBonus: 150, clearDrainTime: 1.4 },
+  stir: { start: 2, max: 3, power: 560, cooldown: 0.6, minSwipe: 55, rewardMult: 2 },
   input:{ lock: 0.5, touchSlack: 30 },
   physics:{
     buoy: 400, leadSink: 88, damp: 2.1, wobbleF: 1.25, wobbleAmp: 30,
@@ -286,6 +338,51 @@ function pickSpawn(rng, level, nColors){
 }
 function nextRadius(rng, jarW){
   return jarW * lerp(SETTINGS.bubble.rMin, SETTINGS.bubble.rMax, rng());
+}
+
+/* ----- upcoming queue (the player's hand) -----
+   Items are visible before they spawn. Colour items are biased toward
+   colours already floating in the jar (groups form more often); lead and
+   rainbow items are locked: they cannot be promoted nor postponed. */
+function makeQueueItem(rng, level, nColors, presentColors){
+  const pick = pickSpawn(rng, level, nColors);
+  if (pick.type !== 'color') return pick;
+  const q = SETTINGS.queue;
+  if (presentColors && presentColors.length && rng() < q.biasPresent){
+    return { type: 'color', color: presentColors[Math.floor(rng() * presentColors.length)] };
+  }
+  return pick;
+}
+/* Bring queue[i] to the front (player choice). Refuses special items and
+   refuses any promotion while a special item is at the front. */
+function promote(queue, i){
+  if (i <= 0 || i >= queue.length) return false;
+  if (queue[i].type !== 'color') return false;
+  if (queue[0].type !== 'color') return false;
+  const item = queue.splice(i, 1)[0];
+  queue.unshift(item);
+  return true;
+}
+
+/* ----- level goals: fusing enough bubbles clears the level ----- */
+function levelQuota(level){
+  return Math.min(SETTINGS.goal.base + (level - 1) * SETTINGS.goal.perLevel, SETTINGS.goal.max);
+}
+
+/* ----- stir: one directional current through the whole jar ----- */
+function stirImpulse(bubbles, dx, dy, power, cx, cy, diag){
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = dx / len, ny = dy / len;
+  for (const b of bubbles){
+    if (b.fusing) continue;
+    /* uniform push + a slight swirl around the jar centre */
+    b.vx += nx * power;
+    b.vy += ny * power;
+    const ox = (b.x - cx) / diag, oy = (b.y - cy) / diag;
+    const cross = ox * ny - oy * nx;
+    b.vx += -ny * cross * power * 0.45;
+    b.vy += nx * cross * power * 0.45;
+  }
 }
 
 /* ----- grouping (union-find over contact graph) -----
@@ -461,8 +558,8 @@ function stepPhysics(S, dt){
 const PS_LOGIC = {
   SETTINGS, clamp, lerp, easeOutCubic, easeInCubic, makeRng,
   colorsAtLevel, mouthsAtLevel, leadFreqAt, rainbowFreqAt, spawnIntervalAt,
-  makeSurge, updateSurge, pickSpawn, nextRadius, computeGroups, pressureOf,
-  fuseScore, chainMultAfter, makeWave, applyWave, stepPhysics
+  makeSurge, updateSurge, pickSpawn, nextRadius, makeQueueItem, promote, levelQuota, stirImpulse,
+  computeGroups, pressureOf, fuseScore, chainMultAfter, makeWave, applyWave, stepPhysics
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = PS_LOGIC;
 
@@ -473,38 +570,47 @@ const I18N = {
   en: {
     score:'Score', best:'Best', play:'Play', paused:'Paused', resume:'Resume', restart:'Restart',
     home:'Home', replay:'Replay', overTitle:'The jar burst!', newBest:'New best!',
-    rule:'Bubbles rise and pile up under the lid. Tap a group of 3+ same-colour bubbles: they fuse, race up and burst — the shockwave can chain bigger groups. Don\u2019t let the jar fill.',
+    rule:'You choose the next colour and the intake it enters. Fuse groups of 3+ same-colour bubbles to burst them at the lid; reach the level goal to drain the jar and win the level.',
     tagline:'Fuse. Burst. Breathe.',
     language:'Language', sound:'Sound', motion:'Reduce motion',
-    controlsHint:'Mouse / touch / arrows + Space · P: pause',
-    chainStat:'Longest chain', fusionsStat:'Fusions',
+    controlsHint:'Tap: fuse · pick colour / intake · Swipe: stir · P: pause',
+    chainStat:'Longest chain', fusionsStat:'Fusions', levelStat:'Level reached',
     tut1:'Tap this group!', tut2:'Waves make 5-groups fuse on their own!',
+    tutQueue:'Tap a colour to bring it next!', tutStir:'Swipe to stir the jar!',
     surge:'Pressure surge!', cool:'+300 cool!', rainbowHint:'Rainbow joins any group — double wave',
-    levelUp:'Level', sndOn:'Sound on', sndOff:'Sound off'
+    locked:'Locked — this one comes next anyway', noCharges:'No stir charges — chain reactions refill them',
+    levelCleared:'Level cleared!', drainBonus:'Level bonus',
+    levelUp:'Level', next:'Next', stir:'Stir', sndOn:'Sound on', sndOff:'Sound off'
   },
   fr: {
     score:'Score', best:'Record', play:'Jouer', paused:'Pause', resume:'Reprendre', restart:'Recommencer',
     home:'Accueil', replay:'Rejouer', overTitle:'Le bocal a éclaté !', newBest:'Nouveau record !',
-    rule:'Des bulles montent et s\u2019entassent sous le couvercle. Touche un groupe de 3+ bulles de même couleur : elles fusionnent, filent éclater en haut — l\u2019onde de choc peut déclencher des chaînes. Ne laisse pas le bocal se remplir.',
+    rule:'Tu choisis la prochaine couleur et la bouche où elle entre. Fusionne les groupes de 3+ bulles de même couleur pour les faire éclater au couvercle ; atteins l\u2019objectif du niveau pour vider le bocal et le gagner.',
     tagline:'Fusionne. Éclate. Respire.',
     language:'Langue', sound:'Son', motion:'Réduire les mouvements',
-    controlsHint:'Souris / tactile / flèches + Espace · P : pause',
-    chainStat:'Plus longue chaîne', fusionsStat:'Fusions',
+    controlsHint:'Tap : fusionner / choisir couleur / viser · Glisser : remous · P : pause',
+    chainStat:'Plus longue chaîne', fusionsStat:'Fusions', levelStat:'Niveau atteint',
     tut1:'Touche ce groupe !', tut2:'L\u2019onde fait fusionner les groupes de 5 seuls !',
+    tutQueue:'Touche une couleur pour la jouer ensuite !', tutStir:'Glisse pour remuer le bocal !',
     surge:'Montée de pression !', cool:'+300 sang-froid !', rainbowHint:'L\u2019arc-en-ciel rejoint tout groupe — onde double',
-    levelUp:'Niveau', sndOn:'Son activé', sndOff:'Son coupé'
+    locked:'Verrouillée — celle-là arrive quand même', noCharges:'Plus de remous — les cascades les rechargent',
+    levelCleared:'Niveau gagné !', drainBonus:'Bonus de niveau',
+    levelUp:'Niveau', next:'À venir', stir:'Remous', sndOn:'Son activé', sndOff:'Son coupé'
   },
   es: {
     score:'Puntos', best:'Récord', play:'Jugar', paused:'Pausa', resume:'Reanudar', restart:'Reiniciar',
     home:'Inicio', replay:'Repetir', overTitle:'¡El bote ha estallado!', newBest:'¡Nuevo récord!',
-    rule:'Las burbujas suben y se apilan bajo la tapa. Toca un grupo de 3+ burbujas del mismo color: se fusionan, suben y estallan — la onda de choque puede encadenar grupos más grandes. No dejes que el bote se llene.',
+    rule:'Eliges el próximo color y la boca por donde entra. Fusiona grupos de 3+ burbujas del mismo color para hacerlas estallar en la tapa; alcanza el objetivo del nivel para vaciar el bote y ganar el nivel.',
     tagline:'Fusiona. Explota. Respira.',
     language:'Idioma', sound:'Sonido', motion:'Reducir movimiento',
-    controlsHint:'Ratón / táctil / flechas + Espacio · P: pausa',
-    chainStat:'Cadena más larga', fusionsStat:'Fusiones',
+    controlsHint:'Toca: fusionar / elegir color / apuntar · Desliza: remolino · P: pausa',
+    chainStat:'Cadena más larga', fusionsStat:'Fusiones', levelStat:'Nivel alcanzado',
     tut1:'¡Toca este grupo!', tut2:'¡La onda fusiona sola los grupos de 5!',
+    tutQueue:'¡Toca un color para jugarlo a continuación!', tutStir:'¡Desliza para remover el bote!',
     surge:'¡Subida de presión!', cool:'¡+300 sangre fría!', rainbowHint:'El arcoíris se une a cualquier grupo — onda doble',
-    levelUp:'Nivel', sndOn:'Sonido activado', sndOff:'Sonido cortado'
+    locked:'Bloqueada — esta llega de todos modos', noCharges:'Sin remolinos — las reacciones en cadena los recargan',
+    levelCleared:'¡Nivel superado!', drainBonus:'Bonus de nivel',
+    levelUp:'Nivel', next:'Siguiente', stir:'Remolino', sndOn:'Sonido activado', sndOff:'Sonido cortado'
   }
 };
 function detectLang(){
@@ -732,6 +838,9 @@ const G = {
   waves: [], fusing: [], bigs: [], particles: [], popups: [],
   cascadePending: [],
   groups: { groups: [], byId: new Map() },
+  queue: [], armedMouth: 0, armedMouthChosen: false,
+  stirCharges: 0, stirCooldown: 0, stirFx: null, stirHintShown: false, queueHintShown: false,
+  levelFusions: 0, clearing: 0, clearPops: [],
   score: 0, level: 1, fusions: 0, chain: 0, chainBest: 1, chainQuiet: 0,
   elapsed: 0, spawnTimer: 1.0, surge: null,
   alarm: { active: false, crack: 0, grace: 0, coolGiven: false, cond: false },
@@ -781,6 +890,12 @@ function resetSim(){
   G.waves = []; G.fusing = []; G.bigs = []; G.particles = []; G.popups = [];
   G.cascadePending = [];
   G.score = 0; G.level = 1; G.fusions = 0; G.chain = 0; G.chainBest = 1; G.chainQuiet = 0;
+  G.levelFusions = 0; G.clearing = 0; G.clearPops = [];
+  G.queue = [];
+  for (let i = 0; i < SETTINGS.queue.size; i++) G.queue.push(L.makeQueueItem(G.rng, 1, L.colorsAtLevel(1), []));
+  G.armedMouth = 0; G.armedMouthChosen = false;
+  G.stirCharges = SETTINGS.stir.start; G.stirCooldown = 0; G.stirFx = null;
+  G.stirHintShown = tutorialDone; G.queueHintShown = tutorialDone;
   G.elapsed = 0; G.spawnTimer = 1.4;
   G.surge = L.makeSurge(G.rng);
   G.alarm = { active: false, crack: 0, grace: 0, coolGiven: false, cond: false };
@@ -794,6 +909,8 @@ function startGame(){
   G.mode = 'play';
   if (!tutorialDone) startTutorial();
   hud.classList.remove('hidden');
+  queueWrap.classList.remove('hidden');
+  renderQueue();
   updateHud();
   hide(home); hide(pauseScr); hide(overScr);
 }
@@ -802,6 +919,7 @@ function goHome(){
   resetSim();
   G.ambientTimer = 0.2;
   hud.classList.add('hidden');
+  queueWrap.classList.add('hidden');
   show(home); hide(pauseScr); hide(overScr);
 }
 
@@ -809,25 +927,55 @@ function goHome(){
 function activeColors(){ return L.colorsAtLevel(G.level); }
 function mouthCount(){ return L.mouthsAtLevel(G.level); }
 
-function spawnBubble(type, color, slotHint){
+function presentColors(){
+  const jar = G.S.jar, top = jar.y + jar.h * 0.6, out = [];
+  for (const b of G.S.bubbles){
+    if (b.type === 'color' && b.y < top) out.push(b.color);
+  }
+  return out;
+}
+/* the mouth used by the next bubble: the armed one, else the least blocked */
+function nextMouthX(){
   const jar = G.S.jar;
   const slots = mouthPositions(jar, mouthCount());
-  const sx = slotHint !== undefined ? slotHint : slots[Math.floor(G.rng() * slots.length)];
+  const armed = slots[L.clamp(G.armedMouth, 0, slots.length - 1)];
+  if (armed !== undefined && G.armedMouthChosen) return armed;
+  let bestX = slots[0], bestClear = -1;
+  for (const sx of slots){
+    let clear = jar.floorY - jar.lidY;
+    for (const b of G.S.bubbles){
+      if (Math.abs(b.x - sx) < b.r + 30 && b.y + b.r > jar.mouthY){
+        clear = Math.min(clear, jar.mouthY - (b.y + b.r));
+      }
+    }
+    if (clear > bestClear){ bestClear = clear; bestX = sx; }
+  }
+  return bestX;
+}
+function spawnBubble(type, color, slotX){
+  const jar = G.S.jar;
   const r = L.nextRadius(G.rng, jar.w - jar.inset * 2);
-  const b = newBubble(sx + (G.rng() * 10 - 5), jar.floorY - r * 0.6, r, type, color);
+  const b = newBubble(slotX + (G.rng() * 10 - 5), jar.floorY - r * 0.6, r, type, color);
   b.vy = -30; b.age = 0;
   G.S.bubbles.push(b);
   return b;
 }
 function updateSpawner(dt){
+  if (G.clearing > 0) return;
   G.spawnTimer -= dt;
   if (G.spawnTimer <= 0){
     if (G.S.bubbles.length < SETTINGS.cap.bubbles){
-      const pick = L.pickSpawn(G.rng, G.level, activeColors());
-      spawnBubble(pick.type, pick.color);
+      const pick = G.queue.shift();
+      G.queue.push(L.makeQueueItem(G.rng, G.level, activeColors(), presentColors()));
+      renderQueue();
+      spawnBubble(pick.type, pick.color, nextMouthX());
       if (pick.type === 'rainbow' && !G.rainbowSeen){
         G.rainbowSeen = true;
         showChip(t('rainbowHint'), 3800);
+      }
+      if (!G.queueHintShown){
+        G.queueHintShown = true;
+        showChip(t('tutQueue'), 3600);
       }
     }
     const base = L.spawnIntervalAt(G.elapsed, G.surge.phase === 'on');
@@ -899,10 +1047,72 @@ function fuseGroup(members, source){
   G.fusions++;
   AudioSys.glide();
   if (G.tutorial && G.tutorial.step === 1 && source === 'player') advanceTutorial(2);
-  /* level up */
-  const newLevel = 1 + Math.floor(G.fusions / SETTINGS.level.fusions);
-  if (newLevel > G.level){
-    G.level = newLevel; G.levelBanner = 1.6; AudioSys.chime(); updateHud();
+  /* cascade reward: a stir charge back */
+  if (source === 'cascade' && mult >= SETTINGS.stir.rewardMult && G.stirCharges < SETTINGS.stir.max){
+    G.stirCharges++;
+    renderQueue();
+    if (!G.stirHintShown){ G.stirHintShown = true; showChip(t('tutStir'), 3600); }
+  }
+  /* level goal */
+  if (G.clearing <= 0){
+    G.levelFusions += n;
+    const quota = L.levelQuota(G.level);
+    if (G.levelFusions >= quota) startClearing();
+    updateHud();
+  }
+}
+
+/* level cleared: stagger-pop every bubble bottom-to-top, bonus, next level */
+function startClearing(){
+  const jar = G.S.jar;
+  G.clearing = SETTINGS.goal.clearDrainTime;
+  G.levelBanner = G.clearing + 0.6;
+  const bonus = SETTINGS.goal.clearBonus * G.level;
+  G.score += bonus;
+  addPopup(jar.x + jar.w / 2, jar.lidY + 34, '+' + bonus, THEME.sun, 20);
+  showChip(t('levelCleared') + ' +' + bonus, 2200);
+  AudioSys.chime();
+  cancelAlarm();
+  G.alarm.grace = 2;
+  G.clearPops = [];
+  for (const b of G.S.bubbles){
+    /* bottom first: the jar visibly empties downwards-up */
+    const delay = 0.15 + ((b.y - jar.lidY) / (jar.floorY - jar.lidY)) * (G.clearing - 0.35);
+    G.clearPops.push({ b, at: G.S.t + (jar.floorY - b.y) / jar.h * 0.9 + 0.1, delay });
+  }
+  /* trigger order: recompute from bottom (floorY) upward */
+  G.clearPops.sort((p, q) => q.b.y - p.b.y);
+  G.clearPops.forEach((p, i) => { p.at = G.S.t + 0.12 + i * (G.clearing - 0.3) / Math.max(1, G.clearPops.length); });
+}
+function updateClearing(dt){
+  if (G.clearing <= 0) return;
+  G.clearing -= dt;
+  for (let i = G.clearPops.length - 1; i >= 0; i--){
+    const p = G.clearPops[i];
+    if (G.S.t >= p.at){
+      G.clearPops.splice(i, 1);
+      const idx = G.S.bubbles.indexOf(p.b);
+      if (idx >= 0){
+        const b = p.b;
+        G.S.bubbles.splice(idx, 1);
+        const hex = b.type === 'color' ? THEME.bubbleColors[b.color].hex : (b.type === 'rainbow' ? '#ffffff' : THEME.lead);
+        for (let j = 0; j < 5; j++){
+          const a = G.rng() * 6.2832, sp = 50 + G.rng() * 160;
+          G.particles.push({ x: b.x, y: b.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 80, r: 1.5 + G.rng() * 2.5, life: 0.5, t: 0, color: rgba(hex, .7), grav: 1 });
+        }
+        AudioSys.tone(500 + G.rng() * 500, 0.05, { vol: 0.05, type: 'sine' });
+      }
+    }
+  }
+  if (G.clearing <= 0){
+    /* level complete: harder next */
+    G.level++;
+    G.levelFusions = 0;
+    G.armedMouthChosen = false;
+    G.queue = [];
+    for (let i = 0; i < SETTINGS.queue.size; i++) G.queue.push(L.makeQueueItem(G.rng, G.level, activeColors(), []));
+    renderQueue();
+    updateHud();
   }
 }
 
@@ -1041,6 +1251,7 @@ function pressureRatio(){ return L.pressureOf(G.S.bubbles, G.S.jar); }
 function updateAlarm(dt){
   const jar = G.S.jar;
   const alarm = G.alarm;
+  if (G.clearing > 0){ alarm.active = false; alarm.cond = false; AudioSys.siren(false); return; }
   if (alarm.grace > 0){ alarm.grace -= dt; alarm.cond = false; }
   let cond = false;
   if (pressureRatio() >= 1) cond = true;
@@ -1098,6 +1309,7 @@ function gameOver(){
   overBest.textContent = bestScore;
   overChain.textContent = '×' + G.chainBest;
   overFusions.textContent = G.fusions;
+  overLevel.textContent = G.level;
   newBest.classList.toggle('hidden', !isNew);
   setTimeout(() => { if (G.mode === 'over') show(overScr); }, 750);
 }
@@ -1211,7 +1423,63 @@ function flashRing(x, y, r, color){
 function updateHud(){
   hudScore.textContent = G.score;
   hudBest.textContent = bestScore;
-  hudLevel.textContent = (lang === 'fr' ? 'Niv ' : lang === 'es' ? 'Nv ' : 'Lv ') + G.level;
+  const pre = lang === 'fr' ? 'Niv ' : lang === 'es' ? 'Nv ' : 'Lv ';
+  const quota = L.levelQuota(G.level);
+  hudLevelTxt.textContent = pre + G.level + ' · ' + Math.min(G.levelFusions, quota) + '/' + quota;
+  goalFill.style.width = Math.min(100, G.levelFusions / quota * 100) + '%';
+}
+
+/* ---------- upcoming queue UI ---------- */
+const SYMBOL_PATHS = {
+  circle: '<circle cx="12" cy="12" r="6.5" fill="none" stroke="{C}" stroke-width="3"/>',
+  triangle: '<path d="M12 4.5 20 19H4Z" fill="{C}"/>',
+  square: '<rect x="6" y="6" width="12" height="12" rx="2" fill="{C}"/>',
+  diamond: '<path d="M12 4 20 12 12 20 4 12Z" fill="{C}"/>',
+  plus: '<path d="M6 10.2h12v3.6H6zM10.2 6h3.6v12h-3.6z" fill="{C}"/>',
+  noentry: '<circle cx="12" cy="12" r="7" fill="none" stroke="#3d454c" stroke-width="3"/><path d="M7.5 16.5 16.5 7.5" stroke="#3d454c" stroke-width="3" stroke-linecap="round"/>',
+  star: '<path d="M12 3.5 14.3 9l5.9.4-4.5 3.8 1.4 5.7L12 15.9l-5.1 3 1.4-5.7L3.8 9.4 9.7 9Z" fill="{C}"/>'
+};
+function queueChipHtml(item, i){
+  if (item.type === 'lead'){
+    return `<div class="qchip locked ${i === 0 ? 'next' : ''}" style="background:#aeb6bd" data-i="${i}" role="button">` +
+      `<svg viewBox="0 0 24 24">${SYMBOL_PATHS.noentry}</svg><span class="lockmark">!</span></div>`;
+  }
+  if (item.type === 'rainbow'){
+    return `<div class="qchip locked ${i === 0 ? 'next' : ''}" style="background:conic-gradient(#e84a3f,#f7b500,#3fae5a,#2e7cd6,#8a5bd6,#e84a3f)" data-i="${i}" role="button">` +
+      `<svg viewBox="0 0 24 24">${SYMBOL_PATHS.star.replace(/\{C\}/g, '#ffffff')}</svg><span class="lockmark">!</span></div>`;
+  }
+  const col = THEME.bubbleColors[item.color];
+  return `<div class="qchip ${i === 0 ? 'next' : ''}" data-i="${i}" role="button" style="background:${col.hex}">` +
+    `<svg viewBox="0 0 24 24">${SYMBOL_PATHS[col.sym].replace(/\{C\}/g, '#ffffff')}</svg></div>`;
+}
+function renderQueue(){
+  if (!queueEl) return;
+  queueEl.innerHTML = G.queue.map((it, i) => queueChipHtml(it, i)).join('');
+  const dots = [];
+  for (let i = 0; i < SETTINGS.stir.max; i++){
+    dots.push(`<div class="sdot ${i < G.stirCharges ? '' : 'off'}"></div>`);
+  }
+  stirDots.innerHTML = dots.join('');
+}
+function bindQueue(){
+  queueEl.addEventListener('click', e => {
+    if (G.mode !== 'play') return;
+    unlockAudio();
+    const chip = e.target.closest('.qchip');
+    if (!chip) return;
+    const i = +chip.dataset.i;
+    if (L.promote(G.queue, i)){
+      AudioSys.uiTick();
+      renderQueue();
+    } else {
+      AudioSys.plop();
+      chip.animate(
+        [{ transform: 'translateX(0)' }, { transform: 'translateX(-3px)' }, { transform: 'translateX(3px)' }, { transform: 'translateX(0)' }],
+        { duration: 180 }
+      );
+      if (G.queue[i] && G.queue[i].type !== 'color') showChip(t('locked'), 1800);
+    }
+  });
 }
 
 /* ===================== chip ===================== */
@@ -1239,14 +1507,17 @@ function simTick(dt){
     if (ev.start) G.spawnTimer = Math.min(G.spawnTimer, 0.1);
   }
   if (G.surgeShake > 0) G.surgeShake -= dt;
+  if (G.stirCooldown > 0) G.stirCooldown -= dt;
+  if (G.stirFx) G.stirFx.t += dt;
 
   for (const b of G.S.bubbles){ b.age += dt; }
 
   L.stepPhysics(G.S, dt);
   updateFusing(dt);
   updateWaves(dt);
+  updateClearing(dt);
   G.groups = L.computeGroups(G.S.bubbles.filter(b => !b.fusing), SETTINGS.group.eps);
-  checkCascades();
+  if (G.clearing <= 0) checkCascades();
   updateTutorial(dt);
   updateAlarm(dt);
 
@@ -1479,9 +1750,20 @@ function drawLid(jar){
 function drawMouths(jar){
   const slots = mouthPositions(jar, mouthCount());
   const imminent = G.spawnTimer < 0.4 && G.mode === 'play';
-  for (const sx of slots){
+  for (let si = 0; si < slots.length; si++){
+    const sx = slots[si];
     const mw = jar.w * 0.13, mh = 9;
+    const armed = G.armedMouthChosen && si === L.clamp(G.armedMouth, 0, slots.length - 1);
     ctx.save();
+    if (armed){
+      ctx.strokeStyle = rgba(THEME.sun, 0.85);
+      ctx.lineWidth = 2.5;
+      roundRectPath(sx - mw / 2 - 6, jar.floorY - mh - 6, mw + 12, mh + 12, 7);
+      ctx.stroke();
+      ctx.fillStyle = rgba(THEME.sun, 0.12 + 0.08 * Math.sin(G.S.t * 6));
+      roundRectPath(sx - mw / 2 - 6, jar.floorY - mh - 6, mw + 12, mh + 12, 7);
+      ctx.fill();
+    }
     if (imminent){
       ctx.fillStyle = rgba(THEME.sun, 0.25 + 0.2 * Math.sin(G.S.t * 18));
       roundRectPath(sx - mw / 2 - 4, jar.floorY - mh - 4, mw + 8, mh + 8, 6);
@@ -1500,6 +1782,26 @@ function drawMouths(jar){
       ctx.stroke();
     }
     ctx.restore();
+  }
+  /* stir current visual */
+  if (G.stirFx){
+    const fx = G.stirFx;
+    const jar2 = jar;
+    const len = Math.hypot(fx.dx, fx.dy) || 1;
+    const nx = fx.dx / len, ny = fx.dy / len;
+    const cx = jar2.x + jar2.w / 2, cy = jar2.y + jar2.h / 2;
+    const a = L.clamp(1 - fx.t / 0.5, 0, 1);
+    ctx.strokeStyle = rgba(THEME.poolDeep, 0.35 * a);
+    ctx.lineWidth = 6;
+    for (let k = 0; k < 3; k++){
+      const off = (k - 1) * 34;
+      const px = cx - ny * off, py = cy + nx * off;
+      ctx.beginPath();
+      ctx.moveTo(px - nx * jar2.w * 0.42, py - ny * jar2.h * 0.42);
+      ctx.lineTo(px + nx * jar2.w * 0.42 * fx.t * 2, py + ny * jar2.h * 0.42 * fx.t * 2);
+      ctx.stroke();
+    }
+    if (fx.t > 0.5) G.stirFx = null;
   }
 }
 function drawLiseres(){
@@ -1720,15 +2022,60 @@ cv.addEventListener('pointermove', e => {
   const p = canvasPos(e);
   G.hover = pickBubble(p.x, p.y, 10);
 });
+/* tap = fuse / arm a mouth · drag = stir the jar */
+let ptr = null;
 cv.addEventListener('pointerdown', e => {
   unlockAudio();
   if (G.mode !== 'play') return;
   e.preventDefault();
   const p = canvasPos(e);
   G.keyboardMode = false;
-  G.hover = pickBubble(p.x, p.y, 12);
-  if (G.hover) tryFuseAt(p.x, p.y, false);
+  ptr = { x: p.x, y: p.y, t: performance.now() };
 });
+cv.addEventListener('pointerup', e => {
+  if (G.mode !== 'play' || !ptr) { ptr = null; return; }
+  const p = canvasPos(e);
+  const dx = p.x - ptr.x, dy = p.y - ptr.y;
+  const dist = Math.hypot(dx, dy);
+  ptr = null;
+  if (dist >= SETTINGS.stir.minSwipe){
+    tryStir(dx, dy, p.x, p.y);
+    return;
+  }
+  const jar = G.S.jar;
+  G.hover = pickBubble(p.x, p.y, 12);
+  if (G.hover){ tryFuseAt(p.x, p.y, false); return; }
+  /* no bubble here: aiming an intake? */
+  if (p.y > jar.mouthY - 8 && G.clearing <= 0){
+    const slots = mouthPositions(jar, mouthCount());
+    for (let i = 0; i < slots.length; i++){
+      if (Math.abs(p.x - slots[i]) < jar.w * 0.14){
+        G.armedMouth = i; G.armedMouthChosen = true;
+        AudioSys.uiTick();
+        flashRing(slots[i], jar.floorY - 12, 8, THEME.sun);
+        return;
+      }
+    }
+  }
+});
+cv.addEventListener('pointercancel', () => { ptr = null; });
+function tryStir(dx, dy, x, y){
+  const jar = G.S.jar;
+  if (x < jar.x - 40 || x > jar.x + jar.w + 40 || y < jar.y - 30 || y > jar.y + jar.h + 40) return;
+  if (G.stirCooldown > 0) return;
+  if (G.stirCharges <= 0){
+    showChip(t('noCharges'), 1800);
+    AudioSys.plop();
+    return;
+  }
+  G.stirCharges--;
+  G.stirCooldown = SETTINGS.stir.cooldown;
+  L.stirImpulse(G.S.bubbles, dx, dy, SETTINGS.stir.power,
+    jar.x + jar.w / 2, jar.y + jar.h / 2, Math.hypot(jar.w, jar.h));
+  G.stirFx = { dx, dy, t: 0, x, y };
+  AudioSys.noise(0.4, { vol: 0.22, freq: 300, sweep: 900, type: 'bandpass', q: 1.2 });
+  renderQueue();
+}
 function pickBubble(x, y, slack){
   let target = null, bestD = 1e9;
   for (const b of G.S.bubbles){
@@ -1829,6 +2176,9 @@ window.addEventListener('blur', () => { if (G.mode === 'play') setPause(true); }
 const $ = id => document.getElementById(id);
 const hud = $('hud'), home = $('home'), pauseScr = $('pauseScr'), overScr = $('overScr'),
       hudScore = $('hudScore'), hudBest = $('hudBest'), hudLevel = $('hudLevel'),
+      hudLevelTxt = $('hudLevelTxt'), goalFill = $('goalFill'),
+      queueWrap = $('queueWrap'), queueEl = $('queue'), stirDots = $('stirDots'),
+      overLevel = $('overLevel'),
       chip = $('chip'), debugEl = $('debug'), overScore = $('overScore'), overBest = $('overBest'),
       overChain = $('overChain'), overFusions = $('overFusions'), newBest = $('newBest'),
       btnSound = $('btnSound'), sndWave = $('sndWave'), sndMute = $('sndMute');
@@ -1983,6 +2333,11 @@ if (DEBUG){
     tap: (x, y) => tryFuseAt(x, y, false),
     forceAlarm(){ G.S.bubbles.forEach(b => b.y = G.S.jar.mouthY + b.r); },
     pressure: pressureRatio,
+    promote: i => { const r = L.promote(G.queue, i); renderQueue(); return r; },
+    arm: i => { G.armedMouth = i; G.armedMouthChosen = true; },
+    stir: (dx, dy) => tryStir(dx, dy, G.S.jar.x + G.S.jar.w / 2, G.S.jar.y + G.S.jar.h / 2),
+    queue: () => G.queue.slice(),
+    quota: () => L.levelQuota(G.level),
     /* deterministic headless stepping (throttled-background rAF workaround) */
     step(n){ n = n || 1; for (let i = 0; i < n; i++) simTick(STEP); }
   };
@@ -1994,6 +2349,7 @@ resetSim();
 if (DEBUG) debugEl.classList.remove('hidden');
 applyLang();
 refreshToggles();
+bindQueue();
 updateHud();
 requestAnimationFrame(frame);
 </script>

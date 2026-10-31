@@ -1,0 +1,11 @@
+{
+  "title": "Pressure",
+  "description": "Bubbles rise in a sealed jar. Tap same-colour groups to fuse and burst them, ride the shockwaves into chain reactions, and keep the jar from cracking.",
+  "entrypoint": "index.html",
+  "license": "MIT",
+  "genre": ["puzzle", "arcade"],
+  "themes": ["physics", "bubbles"],
+  "controls": ["Click or tap: fuse a group", "Arrow keys: select a group", "Space or Enter: fuse"],
+  "credits": ["Concept: Cédric Bernadac, with Claude", "Game made by Z-Code"],
+  "cover": "cover.png"
+}
